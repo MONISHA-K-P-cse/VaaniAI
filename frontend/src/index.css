@@ -1,0 +1,11 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .glass-panel {
+    @apply bg-slate-800/80 backdrop-blur-md border border-slate-700 shadow-xl rounded-xl;
+  }
+}
+
+body {
+  @apply bg-slate-900 text-slate-100 min-h-screen antialiased;
+}
