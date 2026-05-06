@@ -179,6 +179,85 @@ async def twilio_stream(websocket: WebSocket):
                 )
         print("Session ended.")
 
+from services.tts_service import synthesize
+from services.gemini_stream import transcribe_audio
+from google import genai
+import websockets
+
+@app.websocket("/voice-stream")
+async def voice_stream(websocket: WebSocket):
+    await websocket.accept()
+    print("Voice WebSocket connected!")
+
+    try:
+        from services.database import add_message
+        import uuid
+        client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", "DUMMY_KEY"))
+        
+        while True:
+            data = await websocket.receive_text()
+            payload = json.loads(data)
+            call_id = payload.get("call_id")
+
+            if payload["event"] == "audio":
+                audio_bytes = base64.b64decode(payload["payload"])
+                lang = payload.get("lang", "en-US")
+                
+                # STT
+                text = await transcribe_audio(audio_bytes, lang)
+                
+                if text:
+                    await websocket.send_text(json.dumps({"event": "transcript", "text": text}))
+                    if call_id:
+                        add_message(call_id, str(uuid.uuid4()), "customer", text)
+                    
+                    # LLM
+                    system_prompt = f"You are VaaniAI, a professional Relationship Manager for rural India. Answer the following query concisely and clearly in the {lang} language. Keep the response brief, around 1-3 sentences. Ensure you use respectful terms."
+                    
+                    response = client.models.generate_content(
+                        model='gemini-2.0-flash',
+                        contents=[system_prompt, text]
+                    )
+                    ai_text = response.text
+                    if call_id:
+                        add_message(call_id, str(uuid.uuid4()), "ai", ai_text)
+                    
+                    # TTS
+                    tts_bytes = synthesize(ai_text, language_code=lang)
+                    if tts_bytes:
+                        audio_b64 = base64.b64encode(tts_bytes).decode("utf-8")
+                        await websocket.send_text(json.dumps({"event": "audio", "payload": audio_b64}))
+
+            elif payload["event"] == "text":
+                text = payload.get("payload", "")
+                lang = payload.get("lang", "en-US")
+                
+                if text:
+                    await websocket.send_text(json.dumps({"event": "transcript", "text": text}))
+                    if call_id:
+                        add_message(call_id, str(uuid.uuid4()), "customer", text)
+                    
+                    system_prompt = f"You are VaaniAI, a professional Relationship Manager for rural India. Answer the following query concisely and clearly in the {lang} language. Keep the response brief, around 1-3 sentences. Ensure you use respectful terms."
+                    
+                    response = client.models.generate_content(
+                        model='gemini-2.0-flash',
+                        contents=[system_prompt, text]
+                    )
+                    ai_text = response.text
+                    if call_id:
+                        add_message(call_id, str(uuid.uuid4()), "ai", ai_text)
+                    
+                    tts_bytes = synthesize(ai_text, language_code=lang)
+                    if tts_bytes:
+                        audio_b64 = base64.b64encode(tts_bytes).decode("utf-8")
+                        await websocket.send_text(json.dumps({"event": "audio", "payload": audio_b64}))
+                        
+    except WebSocketDisconnect:
+        print("Voice WebSocket disconnected")
+    except Exception as e:
+        print(f"Error in voice_stream: {e}")
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -4,6 +4,7 @@ import { TranscriptView } from '../components/TranscriptView';
 import { LeadBadge } from '../components/LeadBadge';
 import { WatiAction } from '../components/WatiAction';
 import { PostCallSummary } from '../components/PostCallSummary';
+import { VoiceChat } from '../components/VoiceChat';
 import { PhoneOff, Activity } from 'lucide-react';
 
 export function Dashboard() {
@@ -114,6 +115,7 @@ export function Dashboard() {
 
       <div className="flex flex-col md:flex-row gap-6 flex-1 min-h-0">
         <div className="md:w-1/3 flex flex-col gap-4">
+          <VoiceChat callId={activeCallId || undefined} />
           <ActiveCallFeed 
             calls={calls} 
             activeId={activeCallId || ''} 

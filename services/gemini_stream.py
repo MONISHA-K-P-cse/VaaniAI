@@ -195,3 +195,27 @@ async def send_tool_response(ws, call_id, name, response_data):
         }
     }
     await ws.send(json.dumps(msg))
+
+async def transcribe_audio(chunk: bytes, language_code: str = "en-US") -> str:
+    """
+    Sends audio to Gemini REST API to transcribe it.
+    """
+    from google import genai
+    from google.genai import types
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    
+    prompt = f"Please transcribe this audio exactly as spoken. The spoken language is {language_code}. Just output the text, nothing else."
+    
+    try:
+        response = client.models.generate_content(
+            model='gemini-2.0-flash',
+            contents=[
+                types.Part.from_bytes(data=chunk, mime_type='audio/webm'),
+                prompt
+            ]
+        )
+        return response.text.strip()
+    except Exception as e:
+        print(f"Error transcribing audio: {e}")
+        return ""
+
