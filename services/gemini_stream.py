@@ -11,71 +11,84 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "DUMMY_KEY")
 GEMINI_WS_URL = f"wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key={GEMINI_API_KEY}"
 
 def get_system_instruction(language="English"):
-    base_prompt = "You must constantly evaluate the user's emotional tone from their voice. If they sound Frustrated or Skeptical, immediately call the trigger_discount_offer tool."
+    """
+    Returns the persona instructions for VaaniAI.
+    """
+    base_instructions = (
+        "You are VaaniAI, a professional yet empathetic Relationship Manager. "
+        "Your goal is to assist users with their product queries using the provided tools. "
+        "CRITICAL: You must constantly monitor the user's vocal tone. If they sound Frustrated, Skeptical, or Angry, "
+        "you MUST call the 'trigger_discount_offer' tool immediately to retain them. "
+        "Keep your spoken responses brief (under 20 words) and conversational."
+    )
     
     if language == "Hindi":
-        lang_prompt = "Namaste! Aap ek helpful AI assistant hain. Aapko humesha Hinglish mein baat karni hai, aur 'Ji' aur 'Aap' ka istemaal karna hai. Keep responses brief."
+        lang_prompt = (
+            "Aap VaaniAI hain. Humesha Hinglish (Hindi + English) mein baat karein. "
+            "Respect ke liye 'Ji' aur 'Aap' ka istemaal karein. "
+            "Example: 'Namaste Ji, main aapki kya madad kar sakti hoon?'"
+        )
     elif language == "Tamil":
-        lang_prompt = "You are a helpful AI assistant. Always speak in fluent conversational Tamil. Keep responses brief."
+        lang_prompt = "You are VaaniAI. Speak in fluent, polite conversational Tamil. Use honorifics where appropriate."
     else:
-        lang_prompt = "You are a helpful AI assistant. Speak in English. Keep responses brief and helpful."
+        lang_prompt = "Speak in clear, professional English."
         
-    return f"{lang_prompt} {base_prompt}"
+    return f"{lang_prompt} {base_instructions}"
+
+def get_gemini_tools():
+    """
+    Returns the tool definitions for Gemini.
+    """
+    return [
+        {
+            "functionDeclarations": [
+                {
+                    "name": "query_knowledge_base",
+                    "description": "Searches the product knowledge base for details. Call this for any product-specific questions.",
+                    "parameters": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "query": {"type": "STRING", "description": "The specific product question."}
+                        },
+                        "required": ["query"]
+                    }
+                },
+                {
+                    "name": "trigger_discount_offer",
+                    "description": "Call this IMMEDIATELY if you detect user frustration, anger, or skepticism.",
+                    "parameters": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "sentiment": {"type": "STRING", "description": "The detected emotion (e.g., 'Frustrated')."}
+                        },
+                        "required": ["sentiment"]
+                    }
+                }
+            ]
+        }
+    ]
 
 async def connect_to_gemini():
     import ssl
     ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ssl_context.check_hostname = False
     ssl_context.verify_mode = ssl.CERT_NONE
+    
+    print(f"Connecting to Gemini Live API...")
     gemini_ws = await websockets.connect(GEMINI_WS_URL, ssl=ssl_context)
     
     setup_msg = {
         "setup": {
-            "model": "models/gemini-1.5-flash",
+            "model": "models/gemini-2.0-flash-exp", # Using latest flash for low latency
             "systemInstruction": {
                 "parts": [{"text": get_system_instruction("English")}]
             },
-            "tools": [
-                {
-                    "functionDeclarations": [{
-                        "name": "query_knowledge_base",
-                        "description": "Searches the product knowledge base for details about a product. Call this when the user asks a question about a product.",
-                        "parameters": {
-                            "type": "OBJECT",
-                            "properties": {
-                                "query": {
-                                    "type": "STRING",
-                                    "description": "The user's specific query about a product."
-                                }
-                            },
-                            "required": ["query"]
-                        }
-                    }]
-                },
-                {
-                    "functionDeclarations": [{
-                        "name": "trigger_discount_offer",
-                        "description": "Call this tool IMMEDIATELY if you detect that the user is frustrated, angry, or skeptical based on their vocal tone or words.",
-                        "parameters": {
-                            "type": "OBJECT",
-                            "properties": {
-                                "sentiment": {
-                                    "type": "STRING",
-                                    "description": "The detected emotion (e.g., 'Frustrated', 'Skeptical')."
-                                }
-                            },
-                            "required": ["sentiment"]
-                        }
-                    }]
-                }
-            ],
+            "tools": get_gemini_tools(),
             "generationConfig": {
                 "responseModalities": ["AUDIO"],
                 "speechConfig": {
                     "voiceConfig": {
-                        "prebuiltVoiceConfig": {
-                            "voiceName": "Puck"
-                        }
+                        "prebuiltVoiceConfig": {"voiceName": "Puck"} # 'Puck' is a good friendly voice
                     }
                 }
             }
@@ -83,7 +96,7 @@ async def connect_to_gemini():
     }
     await gemini_ws.send(json.dumps(setup_msg))
     setup_response = await gemini_ws.recv()
-    print("Gemini Setup Response:", setup_response)
+    # print("Gemini Setup Response:", setup_response)
     
     return gemini_ws
 
@@ -92,32 +105,21 @@ def prepare_gemini_audio_chunk(ulaw_payload: str) -> str:
     pcm_bytes = twilio_to_gemini(ulaw_bytes)
     pcm_b64 = base64.b64encode(pcm_bytes).decode('utf-8')
     
-    msg = {
+    return json.dumps({
         "clientContent": {
             "turns": [{
                 "role": "user",
-                "parts": [{
-                    "inlineData": {
-                        "mimeType": "audio/pcm;rate=16000",
-                        "data": pcm_b64
-                    }
-                }]
+                "parts": [{"inlineData": {"mimeType": "audio/pcm;rate=16000", "data": pcm_b64}}]
             }],
             "turnComplete": False
         }
-    }
-    return json.dumps(msg)
+    })
 
 async def handle_gemini_message(gemini_ws, json_str: str, current_lang_state: dict, stream_sid: str = None):
-    """
-    Parses Gemini's response.
-    Returns (ulaw_bytes, None) if audio is present.
-    Returns (None, new_lang) if a tool call was handled and language was updated.
-    """
     try:
         data = json.loads(json_str)
         
-        # 1. Handle Audio Response
+        # 1. Audio/Text Content
         if "serverContent" in data:
             model_turn = data["serverContent"].get("modelTurn", {})
             for part in model_turn.get("parts", []):
@@ -127,104 +129,69 @@ async def handle_gemini_message(gemini_ws, json_str: str, current_lang_state: di
                     add_message(stream_sid, str(uuid.uuid4()), "ai", part["text"])
                 if "inlineData" in part and "data" in part["inlineData"]:
                     pcm_bytes = base64.b64decode(part["inlineData"]["data"])
-                    ulaw_bytes = gemini_to_twilio(pcm_bytes)
-                    return ulaw_bytes, None
+                    return gemini_to_twilio(pcm_bytes), None
 
-        # 2. Handle Tool Calls
+        # 2. Tool Calls
         elif "toolCall" in data:
-            tool_call = data["toolCall"]
-            for call in tool_call.get("functionCalls", []):
+            function_calls = data["toolCall"].get("functionCalls", [])
+            for call in function_calls:
+                name = call["name"]
+                args = call.get("args", {})
                 
-                # RAG Tool
-                if call["name"] == "query_knowledge_base":
-                    query = call.get("args", {}).get("query", "")
-                    print(f"Tool Call Triggered (RAG): {query}")
+                print(f"Executing Tool: {name} with args {args}")
+                
+                if name == "query_knowledge_base":
+                    query = args.get("query", "")
                     
-                    # Language Routing
+                    # Language Routing Check
                     detected_lang = detect_language(query)
                     if detected_lang != current_lang_state["lang"]:
-                        print(f"Language Switch Detected: {current_lang_state['lang']} -> {detected_lang}")
                         current_lang_state["lang"] = detected_lang
-                        
-                        # Send context update to force persona switch
-                        context_msg = {
+                        # Inform Gemini of the switch
+                        await gemini_ws.send(json.dumps({
                             "clientContent": {
-                                "turns": [{
-                                    "role": "user",
-                                    "parts": [{"text": f"SYSTEM NOTE: The user is now speaking {detected_lang}. {get_system_instruction(detected_lang)}"}]
-                                }],
+                                "turns": [{"role": "user", "parts": [{"text": f"SYSTEM: Switch to {detected_lang} mode. {get_system_instruction(detected_lang)}"}]}],
                                 "turnComplete": True
                             }
-                        }
-                        await gemini_ws.send(json.dumps(context_msg))
+                        }))
                     
-                    # Query RAG
-                    rag_result = query_knowledge_base(query, current_lang_state["lang"])
-                    
-                    # Send Tool Response
-                    resp_msg = {
-                        "toolResponse": {
-                            "functionResponses": [{
-                                "id": call["id"],
-                                "name": call["name"],
-                                "response": {"result": rag_result}
-                            }]
-                        }
-                    }
-                    await gemini_ws.send(json.dumps(resp_msg))
+                    result = query_knowledge_base(query, current_lang_state["lang"])
+                    await send_tool_response(gemini_ws, call["id"], name, {"result": result})
                     return None, current_lang_state["lang"]
-                
-                # Sentiment/Discount Tool
-                elif call["name"] == "trigger_discount_offer":
-                    sentiment = call.get("args", {}).get("sentiment", "")
-                    print(f"Tool Call Triggered (Sentiment): detected {sentiment}")
-                    
+
+                elif name == "trigger_discount_offer":
+                    sentiment = args.get("sentiment", "Frustrated")
                     if stream_sid:
                         from services.database import update_call_score
-                        update_call_score(stream_sid, 3) # Lower score to indicate bad sentiment
-                        
+                        update_call_score(stream_sid, 2) # Flag as high-risk lead
+                    
                     if evaluate_intervention(sentiment):
-                        discount_msg = trigger_discount_offer()
-                        
-                        # Inject a tone adjustment message
-                        tone_override_msg = {
+                        offer = trigger_discount_offer()
+                        # Inject tone override
+                        await gemini_ws.send(json.dumps({
                             "clientContent": {
-                                "turns": [{
-                                    "role": "user",
-                                    "parts": [{"text": "SYSTEM OVERRIDE: The user is frustrated. Immediately adopt an extremely Apologetic and Reassuring tone."}]
-                                }],
+                                "turns": [{"role": "user", "parts": [{"text": "SYSTEM: User is frustrated. Be extremely apologetic and offer the following: " + offer}]}],
                                 "turnComplete": True
                             }
-                        }
-                        await gemini_ws.send(json.dumps(tone_override_msg))
-                        
-                        # Return discount code
-                        resp_msg = {
-                            "toolResponse": {
-                                "functionResponses": [{
-                                    "id": call["id"],
-                                    "name": call["name"],
-                                    "response": {"result": discount_msg}
-                                }]
-                            }
-                        }
-                        await gemini_ws.send(json.dumps(resp_msg))
+                        }))
+                        await send_tool_response(gemini_ws, call["id"], name, {"result": offer})
                     else:
-                        # Return no discount needed
-                        resp_msg = {
-                            "toolResponse": {
-                                "functionResponses": [{
-                                    "id": call["id"],
-                                    "name": call["name"],
-                                    "response": {"result": "No intervention required."}
-                                }]
-                            }
-                        }
-                        await gemini_ws.send(json.dumps(resp_msg))
-                        
+                        await send_tool_response(gemini_ws, call["id"], name, {"result": "No intervention needed."})
+                    
                     return None, current_lang_state["lang"]
                     
     except Exception as e:
-        print("Error handling Gemini message:", e)
-        
+        print(f"Error in handle_gemini_message: {e}")
     return None, None
+
+async def send_tool_response(ws, call_id, name, response_data):
+    msg = {
+        "toolResponse": {
+            "functionResponses": [{
+                "id": call_id,
+                "name": name,
+                "response": response_data
+            }]
+        }
+    }
+    await ws.send(json.dumps(msg))

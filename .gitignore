@@ -1,7 +1,23 @@
-venv/
+# Python
 __pycache__/
-.env
-data/
-.agents/
+*.pyc
+*.pyo
+*.pyd
+env/
+.venv/
+*.sqlite3
+
+# Node / Vite
 node_modules/
+dist/
+.vite/
+*.log
+
+# Sensitive files (do NOT push keys!)
+.env
+serviceAccountKey.json
+
+# OS / IDE artefacts
 .DS_Store
+.idea/
+.vscode/

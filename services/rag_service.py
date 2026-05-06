@@ -19,7 +19,7 @@ def query_knowledge_base(query: str, language: str = "English") -> str:
         
         # Embed query
         embed_resp = client.models.embed_content(
-            model='text-embedding-004',
+            model='gemini-embedding-2',
             contents=query,
         )
         query_vector = embed_resp.embeddings[0].values

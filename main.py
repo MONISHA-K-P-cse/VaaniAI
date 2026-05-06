@@ -11,14 +11,27 @@ load_dotenv()
 from services.gemini_stream import connect_to_gemini, prepare_gemini_audio_chunk, handle_gemini_message
 from services.post_call_service import generate_post_call_data, send_whatsapp_followup
 from services.database import init_db, get_calls, get_messages, get_call_by_id, create_call, update_call_status
+from services.firebase_service import init_firebase, sync_call_to_firestore, send_push_notification
 import random
+import os
+import sys
 
-app = FastAPI(title="VaaniAI Twilio WebSocket Server")
+# 1. Startup Environment Validation
+REQUIRED_ENV_VARS = ["GEMINI_API_KEY", "PINECONE_API_KEY"]
+missing_vars = [var for var in REQUIRED_ENV_VARS if not os.environ.get(var)]
+if missing_vars:
+    print(f"CRITICAL ERROR: Missing required environment variables: {', '.join(missing_vars)}")
+    print("Please set them in your .env file or environment.")
+    # In a real app we might sys.exit(1), but for FastAPI we'll just log loudly
+    # sys.exit(1)
+
+app = FastAPI(title="VaaniAI RM Intelligence Server")
 
 @app.on_event("startup")
 async def startup_event():
     init_db()
-    print("Database initialized.")
+    init_firebase()
+    print("Database and Firebase initialized.")
 
 app.add_middleware(
     CORSMiddleware,
@@ -54,6 +67,16 @@ async def handle_post_call(request: PostCallRequest):
     data["whatsapp_sent"] = success
     return data
 
+@app.get("/api/knowledge-base")
+async def fetch_knowledge_base():
+    # This matches the data seeded in scripts/seed_kb.py
+    return [
+        {"id": "prod_1", "title": "Tractor Loans", "content": "Loans for Mahindra, John Deere, etc. 8.5% interest, up to 7 years."},
+        {"id": "prod_2", "title": "Crop Insurance", "content": "Kharif (2%) and Rabi (1.5%) crop protection. 30-day claim settlement."},
+        {"id": "prod_3", "title": "Digital Mandi", "content": "Real-time market prices, direct buyer connections, 1% commission."},
+        {"id": "company_info", "title": "About VaaniAI", "content": "AI-first Relationship Manager for rural India supporting EN, HI, TA."}
+    ]
+
 @app.websocket("/twilio-stream")
 async def twilio_stream(websocket: WebSocket):
     await websocket.accept()
@@ -78,16 +101,22 @@ async def twilio_stream(websocket: WebSocket):
                     
                     if event == "start":
                         stream_sid = msg["start"]["streamSid"]
-                        # Create a dummy lead entry in DB for this stream
-                        names = ["Ramesh Singh", "Sunita Devi", "Amit Patel", "Priya Sharma"]
-                        phones = ["+91 98765 43210", "+91 91234 56780", "+91 99887 77665", "+91 98765 11223"]
-                        idx = random.randint(0, len(names)-1)
-                        create_call(stream_sid, names[idx], phones[idx])
+                        
+                        # Create a demo lead entry in DB
+                        # For hackathon demo, we use a predictable lead if not provided
+                        demo_names = ["Ramesh Singh", "Sunita Devi", "Amit Patel", "Priya Sharma"]
+                        demo_phones = ["+91 98765 43210", "+91 91234 56780", "+91 99887 77665", "+91 98765 11223"]
+                        idx = random.randint(0, len(demo_names)-1)
+                        
+                        create_call(stream_sid, demo_names[idx], demo_phones[idx])
+                        
+                        # Add initial greeting message to DB
                         from services.database import add_message
                         import uuid
-                        add_message(stream_sid, str(uuid.uuid4()), 'ai', f'Namaste {names[idx]} Ji! Main VaaniAI se baat kar rahi hoon. Kya main aapki madad kar sakti hoon?')
-                        add_message(stream_sid, str(uuid.uuid4()), 'customer', 'Haan ji, mujhe janna tha.')
-                        print(f"Started Media Stream: {stream_sid}")
+                        greeting = f"Namaste {demo_names[idx]} Ji! Main VaaniAI se baat kar rahi hoon. Kya main aapki madad kar sakti hoon?"
+                        add_message(stream_sid, str(uuid.uuid4()), 'ai', greeting)
+                        
+                        print(f"Started Media Stream: {stream_sid} for {demo_names[idx]}")
                         
                     elif event == "media":
                         payload = msg["media"]["payload"]
@@ -96,7 +125,7 @@ async def twilio_stream(websocket: WebSocket):
                         await gemini_ws.send(gemini_chunk)
                         
                     elif event == "stop":
-                        print("Stream stopped by Twilio")
+                        print(f"Stream stopped by Twilio: {stream_sid}")
                         break
                         
             except WebSocketDisconnect:
@@ -140,6 +169,14 @@ async def twilio_stream(websocket: WebSocket):
             await gemini_ws.close()
         if stream_sid:
             update_call_status(stream_sid, False)
+            # Sync final state to Firestore
+            call_data = get_call_by_id(stream_sid)
+            if call_data:
+                sync_call_to_firestore(call_data)
+                send_push_notification(
+                    "Call Concluded", 
+                    f"Relationship Manager session with {call_data['customerName']} ended."
+                )
         print("Session ended.")
 
 if __name__ == "__main__":
