@@ -20,9 +20,23 @@ export function History() {
     }
   }, [selectedCallId]);
 
+  const handleClearHistory = async () => {
+    if (!window.confirm("Are you sure you want to delete all call history? This cannot be undone.")) return;
+    try {
+      const res = await fetch('http://localhost:8000/api/calls', { method: 'DELETE' });
+      if (res.ok) {
+        setCalls([]);
+        setSelectedCallId(null);
+        setMessages([]);
+      }
+    } catch (err) {
+      console.error("Failed to clear history:", err);
+    }
+  };
+
   return (
     <div className="p-6 flex flex-col gap-6 max-w-7xl mx-auto h-full">
-      <header className="glass-panel p-6 rounded-2xl border border-slate-800 bg-slate-900/50 backdrop-blur-md shadow-2xl">
+      <header className="glass-panel p-6 rounded-2xl border border-slate-800 bg-slate-900/50 backdrop-blur-md shadow-2xl flex flex-col md:flex-row justify-between items-center gap-4">
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
             <HistoryIcon className="text-white" />
@@ -34,6 +48,12 @@ export function History() {
             <p className="text-slate-400 text-sm mt-1">Review past intelligence and conversations</p>
           </div>
         </div>
+        <button 
+          onClick={handleClearHistory}
+          className="px-4 py-2 bg-red-500/10 text-red-400 border border-red-500/20 rounded-xl hover:bg-red-500 hover:text-white transition-all text-sm font-medium"
+        >
+          Clear All History
+        </button>
       </header>
 
       <div className="flex flex-col md:flex-row gap-6 flex-1 min-h-0">

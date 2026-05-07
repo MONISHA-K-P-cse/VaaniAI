@@ -91,3 +91,11 @@ def get_call_by_id(call_id: str):
     if row:
         return {"id": row["id"], "customerName": row["customer_name"], "phone": row["phone"], "duration": row["duration"], "isActive": bool(row["is_active"]), "score": row["score"]}
     return None
+
+def clear_all_data():
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('DELETE FROM calls')
+    c.execute('DELETE FROM messages')
+    conn.commit()
+    conn.close()

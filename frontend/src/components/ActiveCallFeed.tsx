@@ -1,4 +1,4 @@
-import { PhoneCall, User } from 'lucide-react';
+import { PhoneCall, User, Plus } from 'lucide-react';
 import { clsx } from 'clsx';
 
 type Call = {
@@ -9,7 +9,7 @@ type Call = {
   isActive: boolean;
 };
 
-export function ActiveCallFeed({ calls, activeId, onSelect }: { calls: Call[], activeId: string, onSelect: (id: string) => void }) {
+export function ActiveCallFeed({ calls, activeId, onSelect, onSimulate }: { calls: Call[], activeId: string, onSelect: (id: string) => void, onSimulate: () => void }) {
   return (
     <div className="glass-panel w-full md:w-80 flex flex-col h-[30vh] md:h-auto overflow-hidden flex-shrink-0">
       <div className="p-4 border-b border-slate-700 bg-slate-800/50 flex items-center justify-between">
@@ -17,9 +17,18 @@ export function ActiveCallFeed({ calls, activeId, onSelect }: { calls: Call[], a
           <PhoneCall size={20} className="text-emerald-400" />
           Active Calls
         </h2>
-        <span className="bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full text-xs font-bold border border-emerald-500/30">
-          {calls.length} Live
-        </span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onSimulate}
+            className="p-1.5 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500 hover:text-white rounded-lg transition-all border border-emerald-500/20"
+            title="Simulate New Call"
+          >
+            <Plus size={16} />
+          </button>
+          <span className="bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full text-xs font-bold border border-emerald-500/30">
+            {calls.length}
+          </span>
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto p-2 space-y-2">
         {calls.map(call => (

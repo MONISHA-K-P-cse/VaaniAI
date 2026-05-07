@@ -33,7 +33,7 @@ def generate_post_call_data(transcript: str, customer_name: str) -> dict:
         """
         
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
+            model='gemini-flash-latest',
             contents=f"Transcript:\n{transcript}",
             config={
                 "system_instruction": system_prompt,

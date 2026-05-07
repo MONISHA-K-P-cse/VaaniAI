@@ -15,6 +15,7 @@ declare global {
 export const VoiceChat: React.FC<{ callId?: string }> = ({ callId }) => {
   const [recording, setRecording] = useState(false);
   const [transcript, setTranscript] = useState("");
+  const [aiResponse, setAiResponse] = useState("");
   const [lang, setLang] = useState<string>(
     (import.meta.env.VITE_DEFAULT_VOICE_LANG as string) ?? "en-US"
   );
@@ -33,11 +34,15 @@ export const VoiceChat: React.FC<{ callId?: string }> = ({ callId }) => {
       if (data.event === "transcript") {
         // Backend confirms it received the text
       } else if (data.event === "audio") {
+        // Render the AI's text response in the UI
+        if (data.text) {
+          setAiResponse(data.text);
+        }
         // Received AI‑generated audio (base64) – play it
         const blob = decodeBase64ToBlob(data.payload, "audio/mp3");
         if (audioRef.current) {
           audioRef.current.src = URL.createObjectURL(blob);
-          audioRef.current.play();
+          audioRef.current.play().catch(e => console.error("Audio playback failed:", e));
         }
       }
     };
@@ -82,6 +87,7 @@ export const VoiceChat: React.FC<{ callId?: string }> = ({ callId }) => {
         recognitionRef.current.start();
         setRecording(true);
         setTranscript(""); // clear previous
+        setAiResponse(""); // clear previous AI reply
       } catch (e) {
         console.error("Failed to start recognition", e);
       }
@@ -180,6 +186,7 @@ export const VoiceChat: React.FC<{ callId?: string }> = ({ callId }) => {
                     JSON.stringify({ event: "text", payload: txt, lang, call_id: callId })
                   );
                   setTranscript(txt);
+                  setAiResponse(""); // clear previous
                   target.value = "";
                 }
               }}
@@ -194,6 +201,13 @@ export const VoiceChat: React.FC<{ callId?: string }> = ({ callId }) => {
           <div className="bg-gray-900/50 rounded-lg p-4 mt-2">
             <p className="text-sm text-gray-400 mb-1">You said:</p>
             <p className="text-white text-sm leading-relaxed">{transcript}</p>
+          </div>
+        )}
+        
+        {aiResponse && (
+          <div className="bg-emerald-900/20 border border-emerald-500/30 rounded-lg p-4 mt-2">
+            <p className="text-sm text-emerald-400 mb-1">VaaniAI Replied:</p>
+            <p className="text-emerald-50 text-sm leading-relaxed">{aiResponse}</p>
           </div>
         )}
       </div>

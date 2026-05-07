@@ -79,7 +79,7 @@ async def connect_to_gemini():
     
     setup_msg = {
         "setup": {
-            "model": "models/gemini-2.0-flash-exp", # Using latest flash for low latency
+            "model": "models/gemini-2.0-flash", # Using latest flash for low latency
             "systemInstruction": {
                 "parts": [{"text": get_system_instruction("English")}]
             },

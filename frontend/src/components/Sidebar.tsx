@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, History, Database, Settings, PhoneCall } from 'lucide-react';
+import { LayoutDashboard, History, Database, Settings, PhoneCall, LogOut } from 'lucide-react';
 import { clsx } from 'clsx';
+import { useAuth } from '../contexts/AuthContext';
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Live Intelligence', path: '/' },
@@ -10,6 +11,8 @@ const navItems = [
 ];
 
 export function Sidebar() {
+  const { signOut } = useAuth();
+
   return (
     <aside className="w-64 border-r border-slate-800 bg-slate-900/50 backdrop-blur-xl flex flex-col h-screen sticky top-0">
       <div className="p-6 border-b border-slate-800">
@@ -39,6 +42,14 @@ export function Sidebar() {
             <span className="font-medium">{item.label}</span>
           </NavLink>
         ))}
+
+        <button
+          onClick={() => signOut()}
+          className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-all duration-200 group mt-4 border border-transparent hover:border-red-500/20"
+        >
+          <LogOut size={20} className="transition-transform group-hover:scale-110" />
+          <span className="font-medium">Log Out</span>
+        </button>
       </nav>
 
       <div className="p-4 border-t border-slate-800">

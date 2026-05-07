@@ -25,7 +25,12 @@ if missing_vars:
     # In a real app we might sys.exit(1), but for FastAPI we'll just log loudly
     # sys.exit(1)
 
+from fastapi.staticfiles import StaticFiles
+
 app = FastAPI(title="VaaniAI RM Intelligence Server")
+
+# Serve static PDFs
+app.mount("/docs", StaticFiles(directory="data/docs"), name="docs")
 
 @app.on_event("startup")
 async def startup_event():
@@ -52,6 +57,26 @@ async def fetch_calls():
 async def fetch_messages(call_id: str):
     return get_messages(call_id)
 
+@app.delete("/api/calls")
+async def clear_history():
+    from services.database import clear_all_data
+    clear_all_data()
+    return {"status": "success", "message": "All history cleared"}
+
+@app.post("/api/calls/simulate")
+async def simulate_call_api():
+    from services.database import create_call
+    import uuid
+    import random
+    
+    names = ["Kavitha Rao", "Mahesh Patil", "Priya Singh", "Ganesh Hegde", "Sunita Devi"]
+    name = random.choice(names)
+    phone = f"+91 {random.randint(60000, 99999)} {random.randint(10000, 99999)}"
+    call_id = f"call_{str(uuid.uuid4())[:8]}"
+    
+    create_call(call_id, name, phone)
+    return {"status": "success", "call_id": call_id}
+
 @app.post("/api/post-call")
 async def handle_post_call(request: PostCallRequest):
     call_info = get_call_by_id(request.call_id)
@@ -67,15 +92,57 @@ async def handle_post_call(request: PostCallRequest):
     data["whatsapp_sent"] = success
     return data
 
+KB_DATA = [
+    {
+        "id": "prod_1", 
+        "title": "Tractor Loans (Kisan Tractor)", 
+        "content": "Loans for top brands like Mahindra, John Deere, and Swaraj. 8.5% interest rate, up to 7 years repayment. Minimum down payment required is only 15%."
+    },
+    {
+        "id": "prod_2", 
+        "title": "Crop Insurance (PMFBY)", 
+        "content": "Kharif (2%) and Rabi (1.5%) crop protection against natural calamities. 30-day claim settlement for yield loss. Coverage includes post-harvest losses for up to 14 days."
+    },
+    {
+        "id": "prod_3", 
+        "title": "Kisan Credit Card (KCC)", 
+        "content": "Credit limit up to 3 Lakh at 7% interest. Get 3% interest subvention for timely repayment, making the effective rate 4%. Flexible credit line for farm inputs."
+    },
+    {
+        "id": "prod_4", 
+        "title": "Animal Husbandry & Dairy Loan", 
+        "content": "Dedicated loans for Dairy, Poultry, and Fisheries. Zero collateral up to 1.6 Lakh. Repayment linked to milk collection cycles for dairy farmers."
+    },
+    {
+        "id": "prod_5", 
+        "title": "Solar Pump Subsidy (PM-KUSUM)", 
+        "content": "Get up to 60% subsidy on standalone solar water pumps. Central Govt provides 30%, and State Govt provides 30%. Farmers only pay 40% of the cost."
+    },
+    {
+        "id": "prod_6", 
+        "title": "Organic Farming Support (PKVY)", 
+        "content": "Financial assistance of ₹50,000 per hectare for 3 years. Covers organic inputs, certification, and marketing support for farmer clusters."
+    },
+]
+
 @app.get("/api/knowledge-base")
 async def fetch_knowledge_base():
-    # This matches the data seeded in scripts/seed_kb.py
-    return [
-        {"id": "prod_1", "title": "Tractor Loans", "content": "Loans for Mahindra, John Deere, etc. 8.5% interest, up to 7 years."},
-        {"id": "prod_2", "title": "Crop Insurance", "content": "Kharif (2%) and Rabi (1.5%) crop protection. 30-day claim settlement."},
-        {"id": "prod_3", "title": "Digital Mandi", "content": "Real-time market prices, direct buyer connections, 1% commission."},
-        {"id": "company_info", "title": "About VaaniAI", "content": "AI-first Relationship Manager for rural India supporting EN, HI, TA."}
-    ]
+    return KB_DATA
+
+class KBItem(BaseModel):
+    title: str
+    content: str
+
+@app.post("/api/knowledge-base")
+async def add_knowledge_base_item(item: KBItem):
+    import uuid
+    new_item = {
+        "id": f"kb_{str(uuid.uuid4())[:8]}",
+        "title": item.title,
+        "content": item.content
+    }
+    KB_DATA.append(new_item)
+    return new_item
 
 @app.websocket("/twilio-stream")
 async def twilio_stream(websocket: WebSocket):
@@ -192,72 +259,132 @@ async def voice_stream(websocket: WebSocket):
     try:
         from services.database import add_message
         import uuid
-        client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", "DUMMY_KEY"))
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            print("ERROR: GEMINI_API_KEY not found in environment!")
+            await websocket.send_text(json.dumps({"event": "transcript", "text": "SYSTEM ERROR: API Key missing."}))
+            await websocket.close()
+            return
         
+        client = genai.Client(api_key=api_key)
+        
+        def get_local_response(query: str, lang: str = "en-US"):
+            query = query.lower()
+            
+            # Localized fallbacks
+            fallbacks = {
+                "en-US": "I am VaaniAI, your Relationship Manager. I'm here to help you with Tractor Loans, Crop Insurance, KCC, Animal Husbandry, and Solar Pump subsidies. Could you please specify which of these you'd like to know more about?",
+                "hi-IN": "मैं वाणी एआई हूँ, आपकी रिलेशनशिप मैनेजर। मैं ट्रैक्टर लोन, फसल बीमा, केसीसी, पशुपालन और सोलर पंप सब्सिडी में आपकी मदद कर सकती हूँ। कृपया बताएं कि आप किसके बारे में जानना चाहते हैं?",
+                "kn-IN": "ನಾನು ವಾಣಿ ಎಐ, ನಿಮ್ಮ ರಿಲೇಶನ್‌ಶಿಪ್ ಮ್ಯಾನೇಜರ್. ಟ್ರ್ಯಾಕ್ಟರ್ ಸಾಲಗಳು, ಬೆಳೆ ವಿಮೆ, ಕೆಸಿಸಿ, ಪಶುಸಂಗೋಪನೆ ಮತ್ತು ಸೋಲಾರ್ ಪಂಪ್ ಸಬ್ಸಿಡಿಗಳ ಬಗ್ಗೆ ನಾನು ನಿಮಗೆ ಸಹಾಯ ಮಾಡಬಲ್ಲೆ. ಇವುಗಳಲ್ಲಿ ನೀವು ಯಾವುದರ ಬಗ್ಗೆ ತಿಳಿಯಲು ಬಯಸುತ್ತೀರಿ?"
+            }
+            
+            # Match keywords and find policy
+            for item in KB_DATA:
+                # Basic cross-language keyword detection (Title remains English, but query might be local)
+                if any(word in query for word in item["title"].lower().split()):
+                    if lang == "hi-IN":
+                        return f"हमारे {item['title']} पॉलिसी के आधार पर: {item['content']}"
+                    elif lang == "kn-IN":
+                        return f"{item['title']} ಪಾಲಿಸಿಯ ಆಧಾರದ ಮೇಲೆ: {item['content']}"
+                    return f"Based on our {item['title']} policy: {item['content']}"
+            
+            return fallbacks.get(lang, fallbacks["en-US"])
+
         while True:
-            data = await websocket.receive_text()
-            payload = json.loads(data)
-            call_id = payload.get("call_id")
+            try:
+                data = await websocket.receive_text()
+                payload = json.loads(data)
+                call_id = payload.get("call_id")
+                if call_id == "undefined" or not call_id:
+                    call_id = None
 
-            if payload["event"] == "audio":
-                audio_bytes = base64.b64decode(payload["payload"])
+                event = payload.get("event")
                 lang = payload.get("lang", "en-US")
-                
-                # STT
-                text = await transcribe_audio(audio_bytes, lang)
-                
-                if text:
-                    await websocket.send_text(json.dumps({"event": "transcript", "text": text}))
-                    if call_id:
-                        add_message(call_id, str(uuid.uuid4()), "customer", text)
-                    
-                    # LLM
-                    system_prompt = f"You are VaaniAI, a professional Relationship Manager for rural India. Answer the following query concisely and clearly in the {lang} language. Keep the response brief, around 1-3 sentences. Ensure you use respectful terms."
-                    
-                    response = client.models.generate_content(
-                        model='gemini-2.0-flash',
-                        contents=[system_prompt, text]
-                    )
-                    ai_text = response.text
-                    if call_id:
-                        add_message(call_id, str(uuid.uuid4()), "ai", ai_text)
-                    
-                    # TTS
-                    tts_bytes = synthesize(ai_text, language_code=lang)
-                    if tts_bytes:
-                        audio_b64 = base64.b64encode(tts_bytes).decode("utf-8")
-                        await websocket.send_text(json.dumps({"event": "audio", "payload": audio_b64}))
 
-            elif payload["event"] == "text":
-                text = payload.get("payload", "")
-                lang = payload.get("lang", "en-US")
-                
-                if text:
-                    await websocket.send_text(json.dumps({"event": "transcript", "text": text}))
-                    if call_id:
-                        add_message(call_id, str(uuid.uuid4()), "customer", text)
+                if event == "audio":
+                    print(f"DEBUG: Audio received for {call_id} in {lang}")
+                    audio_bytes = base64.b64decode(payload["payload"])
+                    text = await transcribe_audio(audio_bytes, lang)
                     
-                    system_prompt = f"You are VaaniAI, a professional Relationship Manager for rural India. Answer the following query concisely and clearly in the {lang} language. Keep the response brief, around 1-3 sentences. Ensure you use respectful terms."
-                    
-                    response = client.models.generate_content(
-                        model='gemini-2.0-flash',
-                        contents=[system_prompt, text]
-                    )
-                    ai_text = response.text
-                    if call_id:
-                        add_message(call_id, str(uuid.uuid4()), "ai", ai_text)
-                    
-                    tts_bytes = synthesize(ai_text, language_code=lang)
-                    if tts_bytes:
-                        audio_b64 = base64.b64encode(tts_bytes).decode("utf-8")
-                        await websocket.send_text(json.dumps({"event": "audio", "payload": audio_b64}))
+                    if text:
+                        print(f"STT: {text}")
+                        await websocket.send_text(json.dumps({"event": "transcript", "text": text}))
+                        if call_id:
+                            add_message(call_id, str(uuid.uuid4()), "customer", text)
                         
+                        system_prompt = f"You are VaaniAI, a professional Relationship Manager for rural India. Answer the following query concisely and clearly in the {lang} language. Keep the response brief, around 1-3 sentences. Ensure you use respectful terms."
+                        
+                        ai_text = None
+                        print(f"Calling Gemini (1.5-flash) for {lang}: {text}")
+                        try:
+                            response = client.models.generate_content(
+                                model='gemini-1.5-flash',
+                                contents=[system_prompt, text]
+                            )
+                            ai_text = response.text
+                            print(f"Gemini Success: {ai_text}")
+                        except Exception as gem_err:
+                            print(f"Gemini Error hit. Switching to Local Brain ({lang}).")
+                            ai_text = get_local_response(text, lang)
+                        
+                        if ai_text:
+                            if call_id:
+                                add_message(call_id, str(uuid.uuid4()), "ai", ai_text)
+                            
+                            print(f"Synthesizing {lang} voice for: {ai_text[:50]}...")
+                            tts_bytes = await synthesize(ai_text, language_code=lang)
+                            if tts_bytes:
+                                audio_b64 = base64.b64encode(tts_bytes).decode("utf-8")
+                                await websocket.send_text(json.dumps({"event": "audio", "payload": audio_b64, "text": ai_text}))
+                                print("Sent audio response.")
+                            else:
+                                await websocket.send_text(json.dumps({"event": "transcript", "text": ai_text}))
+
+                elif event == "text":
+                    text = payload.get("payload", "")
+                    if text:
+                        print(f"DEBUG: Text input received: {text} in {lang}")
+                        await websocket.send_text(json.dumps({"event": "transcript", "text": text}))
+                        if call_id:
+                            add_message(call_id, str(uuid.uuid4()), "customer", text)
+                        
+                        system_prompt = f"You are VaaniAI, a professional Relationship Manager for rural India. Answer the following query concisely and clearly in the {lang} language. Keep the response brief, around 1-3 sentences. Ensure you use respectful terms."
+                        
+                        ai_text = None
+                        print(f"Calling Gemini (1.5-flash) for {lang}: {text}")
+                        try:
+                            response = client.models.generate_content(
+                                model='gemini-1.5-flash',
+                                contents=[system_prompt, text]
+                            )
+                            ai_text = response.text
+                            print(f"Gemini Success: {ai_text}")
+                        except Exception as gem_err:
+                            print(f"Gemini Error hit. Switching to Local Brain ({lang}).")
+                            ai_text = get_local_response(text, lang)
+                        
+                        if ai_text:
+                            if call_id:
+                                add_message(call_id, str(uuid.uuid4()), "ai", ai_text)
+                            
+                            print(f"Synthesizing {lang} voice for: {ai_text[:50]}...")
+                            tts_bytes = await synthesize(ai_text, language_code=lang)
+                            if tts_bytes:
+                                audio_b64 = base64.b64encode(tts_bytes).decode("utf-8")
+                                await websocket.send_text(json.dumps({"event": "audio", "payload": audio_b64, "text": ai_text}))
+                                print("Sent audio response.")
+                            else:
+                                await websocket.send_text(json.dumps({"event": "transcript", "text": ai_text}))
+                            
+            except WebSocketDisconnect:
+                print("Voice WebSocket disconnected in loop")
+                break
+            except Exception as e:
+                print(f"Error in message processing loop: {e}")
+                if "disconnect" in str(e).lower() or "close" in str(e).lower():
+                    break
+                
     except WebSocketDisconnect:
         print("Voice WebSocket disconnected")
     except Exception as e:
-        print(f"Error in voice_stream: {e}")
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+        print(f"Fatal error in voice_stream: {e}")

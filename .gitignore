@@ -6,6 +6,8 @@ __pycache__/
 env/
 .venv/
 *.sqlite3
+*.db
+data/vaani.db
 
 # Node / Vite
 node_modules/
@@ -21,3 +23,6 @@ serviceAccountKey.json
 .DS_Store
 .idea/
 .vscode/
+scratch/
+test_genai.py
+vaani_brain_test.py

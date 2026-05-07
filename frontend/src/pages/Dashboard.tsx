@@ -5,7 +5,7 @@ import { LeadBadge } from '../components/LeadBadge';
 import { WatiAction } from '../components/WatiAction';
 import { PostCallSummary } from '../components/PostCallSummary';
 import { VoiceChat } from '../components/VoiceChat';
-import { PhoneOff, Activity } from 'lucide-react';
+import { PhoneOff, Activity, MessageCircle } from 'lucide-react';
 
 export function Dashboard() {
   const [calls, setCalls] = useState<any[]>([]);
@@ -76,41 +76,81 @@ export function Dashboard() {
     }
   };
 
+  const handleSimulateCall = async () => {
+    try {
+      const res = await fetch('http://localhost:8000/api/calls/simulate', { method: 'POST' });
+      const data = await res.json();
+      if (data.status === 'success') {
+        // Refresh calls
+        const freshCalls = await fetch('http://localhost:8000/api/calls').then(r => r.json());
+        setCalls(freshCalls);
+        setActiveCallId(data.call_id);
+      }
+    } catch (err) {
+      console.error("Simulation failed:", err);
+    }
+  };
+
+  const handleSendWhatsApp = async () => {
+    if (!activeCall) return;
+    try {
+      const res = await fetch('http://localhost:8000/api/post-call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ call_id: activeCall.id })
+      });
+      const data = await res.json();
+      setPostCallData(data);
+      alert("WhatsApp summary generated and sent successfully!");
+    } catch (e) { console.error(e); }
+  };
+
   return (
     <div className="p-6 flex flex-col gap-6 max-w-7xl mx-auto h-full">
-      <header className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 glass-panel p-6 rounded-2xl border border-slate-800 bg-slate-900/50 backdrop-blur-md shadow-2xl">
+      <header className="glass-panel p-6 rounded-2xl border border-slate-800 bg-slate-900/50 backdrop-blur-md shadow-2xl flex flex-col md:flex-row justify-between items-center gap-4">
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center shadow-lg shadow-emerald-500/20">
-            <Activity className="text-white animate-pulse" />
+            <Activity className="text-white" />
           </div>
           <div>
             <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
               Live Intelligence
             </h1>
-            <p className="text-slate-400 text-sm mt-1 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-              Real-time Call Monitoring & Analysis
-            </p>
+            <p className="text-slate-400 text-sm mt-1">Real-time Call Monitoring & Analysis</p>
           </div>
         </div>
         
-        {activeCall && (
-          <div className="flex flex-wrap items-center gap-4 mt-2 md:mt-0">
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider ${activeCall.isActive ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-700 text-slate-400'}`}>
-              {activeCall.isActive ? 'Live' : 'Disconnected'}
+        <div className="flex items-center gap-3">
+          <div className="px-4 py-2 bg-slate-800/50 rounded-xl border border-slate-700/50 flex items-center gap-3">
+            <div className="flex flex-col items-end">
+              <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Status</span>
+              <span className={`text-xs font-mono ${activeCall?.isActive ? 'text-emerald-400' : 'text-slate-400'}`}>
+                {activeCall?.isActive ? 'LIVE' : 'DISCONNECTED'}
+              </span>
             </div>
-            <LeadBadge score={activeCall.score} />
-            <WatiAction phoneNumber={activeCall.phone} />
-            {!isCallEnded && (
-              <button 
-                onClick={handleEndCall}
-                className="flex items-center gap-2 bg-rose-600 hover:bg-rose-500 text-white px-4 py-2 rounded-xl font-semibold shadow-lg shadow-rose-600/20 transition-all hover:scale-105 active:scale-95"
-              >
-                <PhoneOff size={18} /> End Call
-              </button>
-            )}
+            <div className="w-px h-8 bg-slate-700"></div>
+            <div className="flex flex-col">
+              <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Score</span>
+              <span className="text-xs font-mono text-amber-400">{activeCall?.score || 0}/10</span>
+            </div>
           </div>
-        )}
+          
+          <button 
+            onClick={handleSendWhatsApp}
+            className="flex items-center gap-2 px-4 py-2 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500 hover:text-white rounded-xl transition-all border border-emerald-500/20 text-sm font-medium"
+          >
+            <MessageCircle size={18} />
+            Send WhatsApp
+          </button>
+          
+          <button 
+            onClick={handleEndCall}
+            className="flex items-center gap-2 px-4 py-2 bg-red-500/10 text-red-400 hover:bg-red-500 hover:text-white rounded-xl transition-all border border-red-500/20 text-sm font-medium"
+          >
+            <PhoneOff size={18} />
+            End Call
+          </button>
+        </div>
       </header>
 
       <div className="flex flex-col md:flex-row gap-6 flex-1 min-h-0">
@@ -120,6 +160,7 @@ export function Dashboard() {
             calls={calls} 
             activeId={activeCallId || ''} 
             onSelect={setActiveCallId} 
+            onSimulate={handleSimulateCall}
           />
         </div>
         <div className="flex-1 flex flex-col gap-4 min-h-0 relative">
